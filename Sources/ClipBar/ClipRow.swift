@@ -33,6 +33,10 @@ final class ClipRow: NSView {
             if clip.kind == .file { t.lineBreakMode = .byTruncatingMiddle }  // keep the file name visible
             t.setContentHuggingPriority(low, for: .horizontal)
             t.setContentCompressionResistancePriority(low, for: .horizontal)
+            if clip.kind == .text, Settings.showHexSwatch, let color = HexColor.parse(clip.preview)
+            {
+                views.append(Swatch.dot(color))
+            }
             primary.append(t)
             views.append(t)
         case .image:

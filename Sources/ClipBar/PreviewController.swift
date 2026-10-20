@@ -123,6 +123,9 @@ final class PreviewController: NSObject {
         switch clip.kind {
         case .text:
             let shown = String((text ?? clip.preview).prefix(5000))
+            if Settings.showHexSwatch, let color = HexColor.parse(text ?? clip.preview) {
+                content.addArrangedSubview(Swatch.block(color, width: 56, height: 56, radius: 10))
+            }
             content.addArrangedSubview(bodyText(shown, truncate: .byTruncatingTail))
         case .file:
             let paths = (text ?? "").split(separator: "\n").compactMap {

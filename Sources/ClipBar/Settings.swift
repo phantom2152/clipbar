@@ -50,4 +50,10 @@ enum Settings {
         get { UserDefaults.standard.object(forKey: "showSpecialSymbols") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "showSpecialSymbols") }
     }
+
+    /// Color dot / swatch for items that are hex colors. On by default.
+    static var showHexSwatch: Bool {
+        get { UserDefaults.standard.object(forKey: "showHexSwatch") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "showHexSwatch") }
+    }
 }

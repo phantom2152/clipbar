@@ -260,3 +260,46 @@ final class MenuRow: NSView {
     }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
+
+// MARK: - Hex colors
+
+enum HexColor {
+    /// "#F00", "#FF5733" or "#FF5733CC" (RRGGBBAA). The whole text must be the color. Anything else returns nil.
+    static func parse(_ raw: String) -> NSColor? {
+        let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard s.hasPrefix("#"), s.count <= 9 else { return nil }
+        var hex = String(s.dropFirst())
+        guard hex.allSatisfy(\.isHexDigit) else { return nil }
+        if hex.count == 3 { hex = hex.map { "\($0)\($0)" }.joined() }
+        guard hex.count == 6 || hex.count == 8, let v = UInt64(hex, radix: 16) else { return nil }
+        let hasAlpha = hex.count == 8
+        let r = CGFloat((v >> (hasAlpha ? 24 : 16)) & 0xFF) / 255
+        let g = CGFloat((v >> (hasAlpha ? 16 : 8)) & 0xFF) / 255
+        let b = CGFloat((v >> (hasAlpha ? 8 : 0)) & 0xFF) / 255
+        let a = hasAlpha ? CGFloat(v & 0xFF) / 255 : 1
+        return NSColor(srgbRed: r, green: g, blue: b, alpha: a)
+    }
+}
+
+/// Small colored shapes: a dot for list rows, a block for the sidebar.
+@MainActor
+enum Swatch {
+    static func dot(_ color: NSColor, size: CGFloat = 10) -> NSView {
+        block(color, width: size, height: size, radius: size / 2)
+    }
+
+    static func block(_ color: NSColor, width: CGFloat, height: CGFloat, radius: CGFloat = 8)
+        -> NSView
+    {
+        let v = NSView()
+        v.wantsLayer = true
+        v.layer?.cornerRadius = radius
+        v.layer?.backgroundColor = color.cgColor
+        v.layer?.borderWidth = 0.5
+        v.layer?.borderColor = NSColor.labelColor.withAlphaComponent(0.3).cgColor  // keeps white/black visible
+        v.translatesAutoresizingMaskIntoConstraints = false
+        v.widthAnchor.constraint(equalToConstant: width).isActive = true
+        v.heightAnchor.constraint(equalToConstant: height).isActive = true
+        return v
+    }
+}
