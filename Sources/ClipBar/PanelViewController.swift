@@ -13,6 +13,7 @@ final class PanelViewController: NSViewController {
     var onClose: (@MainActor () -> Void)?
     var onQuit: (@MainActor () -> Void)?
     var onModalBusy: (@MainActor (Bool) -> Void)?  // true while an alert is up
+    var onSettings: (@MainActor () -> Void)?
 
     private let store: ClipStore
     private let preview = PreviewController()
@@ -478,10 +479,7 @@ final class PanelViewController: NSViewController {
         onClose?()
     }
 
-    /// Placeholder: nothing to configure yet.
-    @objc private func settingsTapped() {
-        // TODO: open a settings window
-    }
+    @objc private func settingsTapped() { onSettings?() }
 
     @objc private func quitTapped() { onQuit?() }
 }

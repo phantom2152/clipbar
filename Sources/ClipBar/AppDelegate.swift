@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let quitMenu = NSMenu()
     private let store = ClipStore()
     private var panel: PanelViewController!
+    private lazy var settings = SettingsWindowController()
 
     private var signalSources: [DispatchSourceSignal] = []
     private var clickMonitor: Any?
@@ -37,6 +38,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.onModalBusy = { [weak self] busy in self?.autoCloseSuspended = busy }
         store.onChange = { [weak self] in self?.panel.storeChanged() }
         _ = panel.view
+        panel.onSettings = { [weak self] in
+            self?.closePopover()  // the popup goes away, then the normal window opens
+            self?.settings.show()
+        }
 
         // pkill / Ctrl+C take the normal quit path
         for sig in [SIGTERM, SIGINT, SIGHUP] {
