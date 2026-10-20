@@ -44,6 +44,14 @@ final class ClipStore {
             CREATE INDEX IF NOT EXISTS idx_clips_order ON clips(pinned DESC, last_at DESC);
             """)
 
+        var hasBundleID = false
+        db?.run("PRAGMA table_info(clips)") {
+            if Database.text($0, 1) == "source_bid" { hasBundleID = true }
+        }
+        if !hasBundleID {
+            db?.exec("ALTER TABLE clips ADD COLUMN source_bid TEXT NOT NULL DEFAULT ''")
+        }
+
         monitor.onText = { [weak self] text, source in self?.addText(text, source: source) }
         monitor.onImage = { [weak self] data, source in self?.addImage(data, source: source) }
         monitor.onFiles = { [weak self] urls, source in self?.addFiles(urls, source: source) }
@@ -55,7 +63,7 @@ final class ClipStore {
     func list(search: String) -> [Clip] {
         guard let db else { return [] }
         var sql =
-            "SELECT id, kind, preview, file, width, height, bytes, source, first_at, last_at, copies, pinned FROM clips"
+            "SELECT id, kind, preview, file, width, height, bytes, source, first_at, last_at, copies, pinned, source_bid FROM clips"
         var binds: [Bind] = []
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
         if !query.isEmpty {
@@ -77,6 +85,7 @@ final class ClipStore {
                     height: Int(Database.int(s, 5)),
                     bytes: Int(Database.int(s, 6)),
                     source: Database.text(s, 7),
+                    sourceBundleID: Database.text(s, 12),
                     firstAt: Date(timeIntervalSince1970: Database.real(s, 8)),
                     lastAt: Date(timeIntervalSince1970: Database.real(s, 9)),
                     copies: Int(Database.int(s, 10)),
@@ -246,15 +255,15 @@ final class ClipStore {
         let now = Date().timeIntervalSince1970
         db?.run(
             """
-            INSERT INTO clips (kind, hash, text, preview, file, width, height, bytes, source, first_at, last_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO clips (kind, hash, text, preview, file, width, height, bytes, source, source_bid, first_at, last_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 .int(Int64(kind.rawValue)), .text(hash), text.map(Bind.text) ?? .null,
                 .text(preview),
                 .text(file), .int(Int64(width)), .int(Int64(height)), .int(Int64(bytes)),
                 .text(source),
-                .real(now), .real(now),
+                .text(monitor.sourceBundleID), .real(now), .real(now),
             ])
         prune()
         onChange?()

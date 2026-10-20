@@ -17,6 +17,7 @@ struct Clip: Identifiable, Equatable, Sendable {
     let height: Int
     let bytes: Int
     let source: String  // app it was copied from
+    let sourceBundleID: String
     let firstAt: Date
     let lastAt: Date
     let copies: Int

@@ -10,6 +10,7 @@ final class ClipboardMonitor {
 
     private var lastCount = -1  // -1: the clipboard content at launch is captured too
     private var timer: Timer?
+    private(set) var sourceBundleID = ""
 
     func start() {
         guard timer == nil else { return }
@@ -37,7 +38,9 @@ final class ClipboardMonitor {
         ]
         if let types = pb.types, types.contains(where: { skip.contains($0.rawValue) }) { return }
 
-        let source = NSWorkspace.shared.frontmostApplication?.localizedName ?? ""
+        let front = NSWorkspace.shared.frontmostApplication
+        let source = front?.localizedName ?? ""
+        sourceBundleID = front?.bundleIdentifier ?? ""
 
         if let urls = pb.readObjects(
             forClasses: [NSURL.self],

@@ -14,7 +14,7 @@ final class ClipRow: NSView {
     private var tracking: NSTrackingArea?
 
     init(clip: Clip, shortcut: Int?, thumbnail: NSImage?) {
-        rowHeight = clip.kind == .image ? 44 : 30
+        rowHeight = clip.kind == .image ? 40 : 24
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         wantsLayer = true
@@ -41,7 +41,7 @@ final class ClipRow: NSView {
             v.imageScaling = .scaleProportionallyDown
             v.imageAlignment = .alignLeft
             v.translatesAutoresizingMaskIntoConstraints = false
-            v.heightAnchor.constraint(equalToConstant: 34).isActive = true
+            v.heightAnchor.constraint(equalToConstant: 32).isActive = true
             v.setContentHuggingPriority(low, for: .horizontal)
             v.setContentCompressionResistancePriority(low, for: .horizontal)
             views.append(v)
