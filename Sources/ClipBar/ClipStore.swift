@@ -114,7 +114,7 @@ final class ClipStore {
         if let condition { sql += " WHERE " + condition }
         sql += " ORDER BY pinned DESC, last_at DESC LIMIT ?"
         var allBinds = binds
-        allBinds.append(.int(Int64(Config.listLimit)))
+        allBinds.append(.int(Int64(Settings.maxItems)))
 
         var out: [Clip] = []
         db.run(sql, allBinds) { s in
@@ -152,6 +152,7 @@ final class ClipStore {
     // MARK: Adding (called by the clipboard monitor)
 
     func addText(_ raw: String, source: String) {
+        guard Settings.storeText else { return }
         guard raw.utf8.count <= Config.maxTextBytes,
             raw.contains(where: { !$0.isWhitespace })
         else { return }
@@ -164,6 +165,7 @@ final class ClipStore {
     }
 
     func addFiles(_ urls: [URL], source: String) {
+        guard Settings.storeFiles else { return }
         let text = urls.map(\.absoluteString).joined(separator: "\n")  // file:///… one per line
         guard !urls.isEmpty, text.utf8.count <= Config.maxTextBytes else { return }
         let hash = Self.sha(Data(("files\n" + text).utf8))
@@ -179,6 +181,7 @@ final class ClipStore {
     }
 
     func addImage(_ data: Data, source: String) {
+        guard Settings.storeImages else { return }
         guard data.count <= Config.maxImageBytes else { return }
         let hash = Self.sha(data)
         if bump(hash: hash) { return }
@@ -311,15 +314,36 @@ final class ClipStore {
         onChange?()
     }
 
-    /// Keeps the newest `historyLimit` unpinned items.
-    private func prune() {
+    /// Keeps the newest `maxItems` unpinned items and, if a size limit is set, drops the oldest ones until
+    /// the total fits. Pinned items are never removed.
+    func prune() {
+        var removed = false
         db?.run(
             """
             DELETE FROM clips WHERE id IN (
                 SELECT id FROM clips WHERE pinned = 0 ORDER BY last_at DESC LIMIT -1 OFFSET ?)
-            """, [.int(Int64(Config.historyLimit))])
-        if (db?.changes ?? 0) > 0 { sweepOrphans() }
+            """, [.int(Int64(Settings.maxItems))])
+        if (db?.changes ?? 0) > 0 { removed = true }
+
+        let limit = Int64(Settings.maxSizeMB) * 1_000_000
+        if limit > 0 {
+            db?.run(
+                """
+                DELETE FROM clips WHERE id IN (
+                    SELECT id FROM (
+                        SELECT id, SUM(bytes) OVER (ORDER BY last_at DESC ROWS UNBOUNDED PRECEDING) AS running
+                        FROM clips WHERE pinned = 0)
+                    WHERE running > ?)
+                """, [.int(limit)])
+            if (db?.changes ?? 0) > 0 { removed = true }
+        }
+        if removed { sweepOrphans() }
     }
+
+    func applyLimits() { prune() }
+
+    /// Sum of the stored sizes (text bytes, original image bytes). Approximate disk use.
+    func usedBytes() -> Int { scalar("SELECT COALESCE(SUM(bytes), 0) FROM clips") }
 
     private func scalar(_ sql: String) -> Int {
         var value = 0

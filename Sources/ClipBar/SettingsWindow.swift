@@ -3,7 +3,7 @@ import AppKit
 /// Normal window (not part of the menu bar popup) with a toolbar of tabs.
 @MainActor
 final class SettingsWindowController: NSWindowController {
-    init() {
+    init(store: ClipStore) {
         let tabs = NSTabViewController()
         tabs.tabStyle = .toolbar
 
@@ -19,6 +19,7 @@ final class SettingsWindowController: NSWindowController {
             let vc: NSViewController
             switch page.title {
             case "General": vc = GeneralSettingsViewController()
+            case "Storage": vc = StorageSettingsViewController(store: store)
             case "Appearance": vc = AppearanceSettingsViewController()
             default: vc = SettingsPageViewController(title: page.title)
             }

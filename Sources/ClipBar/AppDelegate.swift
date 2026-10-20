@@ -6,7 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let quitMenu = NSMenu()
     private let store = ClipStore()
     private var panel: PanelViewController!
-    private lazy var settings = SettingsWindowController()
+    private lazy var settings = SettingsWindowController(store: store)
 
     private var signalSources: [DispatchSourceSignal] = []
     private var clickMonitor: Any?

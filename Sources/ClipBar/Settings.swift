@@ -56,4 +56,32 @@ enum Settings {
         get { UserDefaults.standard.object(forKey: "showHexSwatch") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "showHexSwatch") }
     }
+
+    /// Most unpinned items kept (older ones are removed). Pinned items never count.
+    static var maxItems: Int {
+        get {
+            let v = UserDefaults.standard.integer(forKey: "maxItems")
+            return v > 0 ? v : 200
+        }
+        set { UserDefaults.standard.set(newValue, forKey: "maxItems") }
+    }
+
+    /// Total size of unpinned items in MB. 0 = no limit.
+    static var maxSizeMB: Int {
+        get { UserDefaults.standard.object(forKey: "maxSizeMB") as? Int ?? 500 }
+        set { UserDefaults.standard.set(newValue, forKey: "maxSizeMB") }
+    }
+
+    static var storeText: Bool {
+        get { UserDefaults.standard.object(forKey: "storeText") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "storeText") }
+    }
+    static var storeImages: Bool {
+        get { UserDefaults.standard.object(forKey: "storeImages") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "storeImages") }
+    }
+    static var storeFiles: Bool {
+        get { UserDefaults.standard.object(forKey: "storeFiles") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "storeFiles") }
+    }
 }
