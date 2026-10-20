@@ -44,6 +44,8 @@ final class PanelViewController: NSViewController {
     private var scrollHeight: NSLayoutConstraint!
     private var mainStack: NSStackView!
     private var footerRows: [MenuRow] = []
+    private var hasSeparator = false
+    private let separatorHeight: CGFloat = 7
 
     var isShown: Bool { popup.isVisible }
 
@@ -303,6 +305,7 @@ final class PanelViewController: NSViewController {
             v.removeFromSuperview()
         }
         rows = []
+        hasSeparator = false
 
         if clips.isEmpty {
             let msg =
@@ -320,7 +323,30 @@ final class PanelViewController: NSViewController {
             row.onClick = { [weak self] in self?.choose(i) }
             list.addArrangedSubview(row)
             rows.append(row)
+
+            // line between the last pinned row and the first unpinned one
+            if clip.pinned, i + 1 < clips.count, !clips[i + 1].pinned {
+                list.addArrangedSubview(pinSeparator())
+                hasSeparator = true
+            }
         }
+    }
+
+    private func pinSeparator() -> NSView {
+        let box = NSView()
+        box.translatesAutoresizingMaskIntoConstraints = false
+        let line = NSBox()
+        line.boxType = .separator
+        line.translatesAutoresizingMaskIntoConstraints = false
+        box.addSubview(line)
+        NSLayoutConstraint.activate([
+            box.widthAnchor.constraint(equalToConstant: UI.inner),
+            box.heightAnchor.constraint(equalToConstant: separatorHeight),
+            line.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 10),
+            line.trailingAnchor.constraint(equalTo: box.trailingAnchor, constant: -10),
+            line.centerYAnchor.constraint(equalTo: box.centerYAnchor),
+        ])
+        return box
     }
 
     private func applySelection(scroll shouldScroll: Bool) {
@@ -337,6 +363,7 @@ final class PanelViewController: NSViewController {
         } else {
             listHeight =
                 rows.reduce(0) { $0 + $1.rowHeight } + list.spacing * CGFloat(rows.count - 1)
+                + (hasSeparator ? separatorHeight + list.spacing : 0)
         }
         scrollHeight.constant = min(max(listHeight, 40), 360)
         mainStack.layoutSubtreeIfNeeded()
@@ -465,17 +492,20 @@ final class PanelViewController: NSViewController {
             "This removes \(n) item\(n == 1 ? "" : "s") and their image files. Pinned items are kept."
         alert.addButton(withTitle: "Clear")
         alert.addButton(withTitle: "Cancel")
-        alert.buttons[0].hasDestructiveAction = true  // "Clear" is red
-        alert.buttons[0].bezelColor = .systemRed
-        for b in alert.buttons { b.keyEquivalent = "" }  // neither is default: Return and Esc do nothing
+        alert.buttons[0].hasDestructiveAction = true  // red text, system styling does the rest
+        for b in alert.buttons { b.keyEquivalent = "" }  // neither is default: the user must click
+        alert.showsSuppressionButton = true
+        alert.suppressionButton?.title = "Don't ask again"
 
         onModalBusy?(true)
-        popup.level = .normal  // so the alert is never hidden behind the panel
-        NSApp.activate(ignoringOtherApps: true)
-        let response = alert.runModal()
-        popup.level = .popUpMenu
-        onModalBusy?(false)
-        if response == .alertFirstButtonReturn { store.clearUnpinned() }
+        suppressHoverUntil = .distantFuture  // rows behind the sheet must not open the sidebar
+        alert.beginSheetModal(for: popup) { [weak self] response in
+            guard let self else { return }
+            self.onModalBusy?(false)
+            self.suppressHoverUntil = Date().addingTimeInterval(0.3)
+            if alert.suppressionButton?.state == .on { Settings.confirmClear = false }
+            if response == .alertFirstButtonReturn { self.store.clearUnpinned() }
+        }
     }
 
     @objc private func openFolderTapped() {
