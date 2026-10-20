@@ -52,6 +52,15 @@ final class ClipStore {
             db?.exec("ALTER TABLE clips ADD COLUMN source_bid TEXT NOT NULL DEFAULT ''")
         }
 
+        for (name, ddl) in [
+            ("title", "ALTER TABLE clips ADD COLUMN title TEXT NOT NULL DEFAULT ''"),
+            ("pin_key", "ALTER TABLE clips ADD COLUMN pin_key TEXT NOT NULL DEFAULT ''"),
+        ] {
+            var has = false
+            db?.run("PRAGMA table_info(clips)") { if Database.text($0, 1) == name { has = true } }
+            if !has { db?.exec(ddl) }
+        }
+
         monitor.onText = { [weak self] text, source in self?.addText(text, source: source) }
         monitor.onImage = { [weak self] data, source in self?.addImage(data, source: source) }
         monitor.onFiles = { [weak self] urls, source in self?.addFiles(urls, source: source) }
@@ -110,7 +119,7 @@ final class ClipStore {
     private func fetch(condition: String?, binds: [Bind]) -> [Clip] {
         guard let db else { return [] }
         var sql =
-            "SELECT id, kind, preview, file, width, height, bytes, source, first_at, last_at, copies, pinned, source_bid FROM clips"
+            "SELECT id, kind, preview, file, width, height, bytes, source, first_at, last_at, copies, pinned, source_bid, title, pin_key FROM clips"
         if let condition { sql += " WHERE " + condition }
         sql += " ORDER BY pinned DESC, last_at DESC LIMIT ?"
         var allBinds = binds
@@ -132,7 +141,11 @@ final class ClipStore {
                     firstAt: Date(timeIntervalSince1970: Database.real(s, 8)),
                     lastAt: Date(timeIntervalSince1970: Database.real(s, 9)),
                     copies: Int(Database.int(s, 10)),
-                    pinned: Database.int(s, 11) != 0))
+                    pinned: Database.int(s, 11) != 0,
+                    title: Database.text(s, 13),
+                    pinKey: Database.text(s, 14)
+                ))
+
         }
         return out
     }
@@ -223,7 +236,28 @@ final class ClipStore {
     }
 
     func togglePin(_ id: Int64) {
-        db?.run("UPDATE clips SET pinned = 1 - pinned WHERE id = ?", [.int(id)])
+        // unpinning also drops the custom key (all values on the right are the old row values)
+        db?.run(
+            "UPDATE clips SET pinned = 1 - pinned, pin_key = CASE WHEN pinned = 1 THEN '' ELSE pin_key END WHERE id = ?",
+            [.int(id)])
+        onChange?()
+    }
+
+    func pins() -> [Clip] { fetch(condition: "pinned = 1", binds: []) }
+
+    func setPinTitle(_ id: Int64, _ title: String) {
+        db?.run("UPDATE clips SET title = ? WHERE id = ?", [.text(title), .int(id)])
+        onChange?()
+    }
+
+    /// A key belongs to one item only: giving it away removes it from the previous owner.
+    func setPinKey(_ id: Int64, _ key: String) {
+        if !key.isEmpty {
+            db?.run(
+                "UPDATE clips SET pin_key = '' WHERE pin_key = ? AND id != ?",
+                [.text(key), .int(id)])
+        }
+        db?.run("UPDATE clips SET pin_key = ? WHERE id = ?", [.text(key), .int(id)])
         onChange?()
     }
 

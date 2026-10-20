@@ -27,7 +27,9 @@ final class ClipRow: NSView {
 
         switch clip.kind {
         case .text, .file:
-            let t = NSTextField(labelWithString: Formats.rowText(clip.preview))
+            let shown =
+                (clip.pinned && !clip.title.isEmpty) ? clip.title : Formats.rowText(clip.preview)
+            let t = NSTextField(labelWithString: shown)
             t.font = .systemFont(ofSize: 13)
             t.lineBreakMode = .byTruncatingTail
             if clip.kind == .file { t.lineBreakMode = .byTruncatingMiddle }  // keep the file name visible
@@ -60,8 +62,11 @@ final class ClipRow: NSView {
             pinIcon = p
             views.append(p)
         }
-        if let shortcut {
-            let s = NSTextField(labelWithString: "⌘\(shortcut)")
+        let keyLabel: String? =
+            (clip.pinned && !clip.pinKey.isEmpty)
+            ? clip.pinKey.uppercased() : shortcut.map(String.init)
+        if let keyLabel {
+            let s = NSTextField(labelWithString: "⌘\(keyLabel)")
             s.font = .systemFont(ofSize: 12)
             s.textColor = .tertiaryLabelColor
             secondary.append(s)

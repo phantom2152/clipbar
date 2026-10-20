@@ -282,6 +282,13 @@ final class PanelViewController: NSViewController {
         default: break
         }
         if cmd, let c = chars.first {
+            if c.isLetter,
+                let i = clips.firstIndex(where: { $0.pinned && $0.pinKey == String(c).lowercased() }
+                )
+            {
+                choose(i)
+                return true
+            }
             if c == "p" {
                 togglePinSelected()
                 return true

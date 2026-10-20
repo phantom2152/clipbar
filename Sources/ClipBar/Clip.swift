@@ -22,4 +22,6 @@ struct Clip: Identifiable, Equatable, Sendable {
     let lastAt: Date
     let copies: Int
     let pinned: Bool
+    let title: String  // custom name for a pinned item ("" = show the text)
+    let pinKey: String  // custom ⌘ key for a pinned item ("" = none)
 }

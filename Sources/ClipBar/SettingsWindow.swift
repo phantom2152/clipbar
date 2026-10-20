@@ -22,6 +22,7 @@ final class SettingsWindowController: NSWindowController {
             case "Storage": vc = StorageSettingsViewController(store: store)
             case "Appearance": vc = AppearanceSettingsViewController()
             case "Ignore": vc = IgnoreSettingsViewController()
+            case "Pins": vc = PinsSettingsViewController(store: store)
             default: vc = SettingsPageViewController(title: page.title)
             }
             let item = NSTabViewItem(viewController: vc)
