@@ -58,23 +58,66 @@ final class ClipStore {
     }
 
     // MARK: Reading
-
-    /// Pinned first, then most recently used. Never loads full text.
+    /// Pinned first, then most recently used. Never loads full text into memory.
     func list(search: String) -> [Clip] {
+        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return fetch(condition: nil, binds: []) }
+
+        switch Settings.searchMode {
+        case .exact: return exactMatches(query)
+        case .fuzzy: return fuzzyMatches(query)
+        case .regex: return regexMatches(query)
+        case .mixed:
+            let a = exactMatches(query)
+            if !a.isEmpty { return a }
+            let b = regexMatches(query)
+            if !b.isEmpty { return b }
+            return fuzzyMatches(query)
+        }
+    }
+
+    private func exactMatches(_ q: String) -> [Clip] {
+        fetch(condition: "text LIKE ? ESCAPE '\\'", binds: [.text("%" + Self.escapeLike(q) + "%")])
+    }
+
+    /// Letters in order with anything in between: "cbr" becomes %c%b%r%.
+    private func fuzzyMatches(_ q: String) -> [Clip] {
+        let letters = q.filter { !$0.isWhitespace }.map { Self.escapeLike(String($0)) }
+        guard !letters.isEmpty else { return [] }
+        return fetch(
+            condition: "text LIKE ? ESCAPE '\\'",
+            binds: [.text("%" + letters.joined(separator: "%") + "%")])
+    }
+
+    /// Streams the texts one row at a time and keeps only the ids that match. An invalid pattern finds nothing.
+    private func regexMatches(_ q: String) -> [Clip] {
+        guard let re = try? NSRegularExpression(pattern: q, options: [.caseInsensitive]) else {
+            return []
+        }
+        var ids: [String] = []
+        db?.run("SELECT id, text FROM clips WHERE text IS NOT NULL") { s in
+            let text = Database.text(s, 1)
+            if re.firstMatch(in: text, options: [], range: NSRange(text.startIndex..., in: text))
+                != nil
+            {
+                ids.append(String(Database.int(s, 0)))
+            }
+        }
+        guard !ids.isEmpty else { return [] }
+        return fetch(condition: "id IN (\(ids.joined(separator: ",")))", binds: [])
+    }
+
+    private func fetch(condition: String?, binds: [Bind]) -> [Clip] {
         guard let db else { return [] }
         var sql =
             "SELECT id, kind, preview, file, width, height, bytes, source, first_at, last_at, copies, pinned, source_bid FROM clips"
-        var binds: [Bind] = []
-        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !query.isEmpty {
-            sql += " WHERE text LIKE ? ESCAPE '\\'"
-            binds.append(.text("%" + Self.escapeLike(query) + "%"))
-        }
+        if let condition { sql += " WHERE " + condition }
         sql += " ORDER BY pinned DESC, last_at DESC LIMIT ?"
-        binds.append(.int(Int64(Config.listLimit)))
+        var allBinds = binds
+        allBinds.append(.int(Int64(Config.listLimit)))
 
         var out: [Clip] = []
-        db.run(sql, binds) { s in
+        db.run(sql, allBinds) { s in
             out.append(
                 Clip(
                     id: Database.int(s, 0),

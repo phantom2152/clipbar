@@ -453,6 +453,10 @@ final class PanelViewController: NSViewController {
         let n = store.unpinnedCount()
         guard n > 0 else { return }
         hidePreview()
+        guard Settings.confirmClear else {
+            store.clearUnpinned()
+            return
+        }
 
         let alert = NSAlert()
         alert.alertStyle = .warning

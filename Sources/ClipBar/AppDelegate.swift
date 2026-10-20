@@ -99,6 +99,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        if Settings.clearOnQuit { store.clearUnpinned() }
+    }
+
     private func closePopover() {
         panel.didClose()
         if let m = clickMonitor {
