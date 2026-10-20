@@ -84,4 +84,32 @@ enum Settings {
         get { UserDefaults.standard.object(forKey: "storeFiles") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "storeFiles") }
     }
+
+    /// Pasteboard types ignored out of the box: password managers mark their secrets with these.
+    static let defaultIgnoredTypes = [
+        "org.nspasteboard.ConcealedType",
+        "org.nspasteboard.TransientType",
+        "de.petermaurer.TransientPasteboardType",
+        "com.typeit4me.clipping",
+        "Pasteboard generator type",
+        "com.agilebits.onepassword",
+        "net.antelle.keeweb",
+    ]
+
+    /// Bundle ids of apps whose copies are never stored.
+    static var ignoredApps: [String] {
+        get { UserDefaults.standard.stringArray(forKey: "ignoredApps") ?? [] }
+        set { UserDefaults.standard.set(newValue, forKey: "ignoredApps") }
+    }
+
+    static var ignoredTypes: [String] {
+        get { UserDefaults.standard.stringArray(forKey: "ignoredTypes") ?? defaultIgnoredTypes }
+        set { UserDefaults.standard.set(newValue, forKey: "ignoredTypes") }
+    }
+
+    /// Text copies matching any of these patterns are never stored.
+    static var ignoredRegex: [String] {
+        get { UserDefaults.standard.stringArray(forKey: "ignoredRegex") ?? [] }
+        set { UserDefaults.standard.set(newValue, forKey: "ignoredRegex") }
+    }
 }

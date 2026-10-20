@@ -33,14 +33,13 @@ final class ClipboardMonitor {
 
         // Password managers mark secrets as concealed/transient: never record those.
         // (Delete this check if you want everything saved.)
-        let skip: Set<String> = [
-            "org.nspasteboard.ConcealedType", "org.nspasteboard.TransientType",
-        ]
+        let skip = Set(Settings.ignoredTypes)
         if let types = pb.types, types.contains(where: { skip.contains($0.rawValue) }) { return }
 
         let front = NSWorkspace.shared.frontmostApplication
         let source = front?.localizedName ?? ""
         sourceBundleID = front?.bundleIdentifier ?? ""
+        if !sourceBundleID.isEmpty, Settings.ignoredApps.contains(sourceBundleID) { return }
 
         if let urls = pb.readObjects(
             forClasses: [NSURL.self],

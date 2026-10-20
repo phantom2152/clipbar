@@ -156,6 +156,7 @@ final class ClipStore {
         guard raw.utf8.count <= Config.maxTextBytes,
             raw.contains(where: { !$0.isWhitespace })
         else { return }
+        if Settings.ignoredRegex.contains(where: { Self.matches($0, raw) }) { return }
         let hash = Self.sha(Data(raw.utf8))
         if bump(hash: hash) { return }
 
@@ -359,5 +360,9 @@ final class ClipStore {
         s.replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "%", with: "\\%")
             .replacingOccurrences(of: "_", with: "\\_")
+    }
+    nonisolated private static func matches(_ pattern: String, _ text: String) -> Bool {
+        guard let re = try? NSRegularExpression(pattern: pattern) else { return false }
+        return re.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
     }
 }
