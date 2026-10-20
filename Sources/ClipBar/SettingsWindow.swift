@@ -16,10 +16,12 @@ final class SettingsWindowController: NSWindowController {
             ("Advanced", "slider.horizontal.3"),
         ]
         for page in pages {
-            let vc: NSViewController =
-                page.title == "General"
-                ? GeneralSettingsViewController()
-                : SettingsPageViewController(title: page.title)
+            let vc: NSViewController
+            switch page.title {
+            case "General": vc = GeneralSettingsViewController()
+            case "Appearance": vc = AppearanceSettingsViewController()
+            default: vc = SettingsPageViewController(title: page.title)
+            }
             let item = NSTabViewItem(viewController: vc)
             item.label = page.title
             item.image = NSImage(

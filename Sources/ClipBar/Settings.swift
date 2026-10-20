@@ -44,4 +44,10 @@ enum Settings {
         get { UserDefaults.standard.bool(forKey: "clearOnQuit") }
         set { UserDefaults.standard.set(newValue, forKey: "clearOnQuit") }
     }
+
+    /// Show ⏎ ⇥ · for invisible characters in list rows. On by default.
+    static var showSpecialSymbols: Bool {
+        get { UserDefaults.standard.object(forKey: "showSpecialSymbols") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "showSpecialSymbols") }
+    }
 }

@@ -26,6 +26,35 @@ enum Formats {
     static func bytes(_ n: Int) -> String {
         ByteCountFormatter.string(fromByteCount: Int64(n), countStyle: .file)
     }
+
+    /// Text shown in a list row. With special symbols on, line breaks and tabs become ⏎ and ⇥ and
+    /// spaces at the very start or end become ·. Off: all whitespace collapses to single spaces.
+    static func rowText(_ s: String) -> String {
+        guard Settings.showSpecialSymbols else {
+            let flat = s.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+            return flat.isEmpty ? " " : flat
+        }
+        var chars = Array(s)
+        var i = 0
+        while i < chars.count, chars[i] == " " {
+            chars[i] = "·"
+            i += 1
+        }
+        var j = chars.count - 1
+        while j >= 0, chars[j] == " " {
+            chars[j] = "·"
+            j -= 1
+        }
+        var out = ""
+        for c in chars {
+            switch c {
+            case "\n", "\r", "\r\n": out += "⏎"
+            case "\t": out += "⇥"
+            default: out.append(c)
+            }
+        }
+        return out.isEmpty ? " " : out
+    }
 }
 
 // MARK: - Layout helpers
@@ -36,8 +65,8 @@ final class FlippedStackView: NSStackView {
 
 @MainActor
 enum UI {
-    static let width: CGFloat = 340  // popover width
-    static let inner: CGFloat = 324  // width minus 8pt insets
+    static let width: CGFloat = 400  // popover width
+    static let inner: CGFloat = 384  // width minus 8pt insets
 
     @discardableResult
     static func fixedWidth<V: NSView>(_ v: V, _ width: CGFloat = UI.inner) -> V {

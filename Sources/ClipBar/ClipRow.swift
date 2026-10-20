@@ -27,7 +27,7 @@ final class ClipRow: NSView {
 
         switch clip.kind {
         case .text, .file:
-            let t = NSTextField(labelWithString: clip.preview.isEmpty ? " " : clip.preview)
+            let t = NSTextField(labelWithString: Formats.rowText(clip.preview))
             t.font = .systemFont(ofSize: 13)
             t.lineBreakMode = .byTruncatingTail
             if clip.kind == .file { t.lineBreakMode = .byTruncatingMiddle }  // keep the file name visible

@@ -158,9 +158,8 @@ final class ClipStore {
         let hash = Self.sha(Data(raw.utf8))
         if bump(hash: hash) { return }
 
-        let oneLine = raw.prefix(400).split(whereSeparator: \.isWhitespace).joined(separator: " ")
         insert(
-            kind: .text, hash: hash, text: raw, preview: String(oneLine.prefix(200)),
+            kind: .text, hash: hash, text: raw, preview: String(raw.prefix(200)),
             file: "", width: 0, height: 0, bytes: raw.utf8.count, source: source)
     }
 

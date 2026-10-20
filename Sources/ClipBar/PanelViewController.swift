@@ -230,7 +230,7 @@ final class PanelViewController: NSViewController {
         let visible =
             (bw.screen ?? NSScreen.main)?.visibleFrame
             ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        let mainX = min(max(b.midX - UI.width / 2, visible.minX + 6), visible.maxX - UI.width - 6)
+        let mainX = min(max(b.midX - 170, visible.minX + 6), visible.maxX - UI.width - 6)
         anchorRight = mainX + UI.width
         anchorTop = b.minY - 4
         layoutWindow()
