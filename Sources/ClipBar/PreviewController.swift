@@ -104,15 +104,16 @@ final class PreviewController: NSObject {
         ])
     }
 
+    /// Marks the sidebar as closed. The content stays until finishHide() so it can slide out.
+    func hide() { isVisible = false }
+
     /// Drops the content (and any decoded image) so nothing stays in memory.
-    func hide() {
-        guard isVisible else { return }
-        isVisible = false
+    func finishHide() {
+        guard !isVisible else { return }
         view.isHidden = true
         clear(content)
         clear(meta)
     }
-
     func show(clip: Clip, text: String?, image: NSImage?) {
         pin.setSymbol(clip.pinned ? "pin.slash" : "pin")
         pin.toolTip = clip.pinned ? "Unpin" : "Pin"

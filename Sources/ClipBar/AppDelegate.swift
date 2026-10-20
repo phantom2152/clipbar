@@ -78,6 +78,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ]) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self, !self.autoCloseSuspended else { return }
+                // A click on our own menu bar icon is handled by statusClicked (toggle), not here.
+                if let b = self.item.button, let w = b.window,
+                    w.convertToScreen(b.convert(b.bounds, to: nil)).contains(NSEvent.mouseLocation)
+                {
+                    return
+                }
                 self.closePopover()
             }
         }

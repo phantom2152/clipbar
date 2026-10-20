@@ -26,6 +26,7 @@ final class PanelViewController: NSViewController {
     private var isOpen = false
     private var suppressHoverUntil = Date.distantPast
     private var mouseOnPreview = false
+    private var sidebarOpen = false
     private var showTask: Task<Void, Never>?
     private var hideTask: Task<Void, Never>?
 
@@ -44,6 +45,7 @@ final class PanelViewController: NSViewController {
     private var scrollHeight: NSLayoutConstraint!
     private var mainStack: NSStackView!
     private var footerRows: [MenuRow] = []
+    private var footerActive = false
     private var hasSeparator = false
     private let separatorHeight: CGFloat = 7
 
@@ -155,6 +157,7 @@ final class PanelViewController: NSViewController {
         root.addSubview(preview.view)
         root.addSubview(divider)
         root.addSubview(mainBox)
+        mainBox.autoresizingMask = [.minXMargin]  // main column stays glued to the right edge
         popup.contentView = root
     }
 
@@ -165,6 +168,10 @@ final class PanelViewController: NSViewController {
     ) -> MenuRow {
         let row = MenuRow(title: title, symbol: symbol)
         row.onClick = action
+        row.onHover = { [weak self, weak row] in
+            guard let self, let row else { return }
+            self.footerHovered(row)
+        }
         return row
     }
 
@@ -172,7 +179,7 @@ final class PanelViewController: NSViewController {
 
     /// Before the panel is shown: fill the list so it opens at the right height.
     func prepareForOpen() {
-        footerRows.forEach { $0.resetHover() }
+        clearFooter()
         isOpen = true
         suppressHoverUntil = Date().addingTimeInterval(0.4)  // a resting mouse must not steal the selection
         search.stringValue = ""
@@ -203,7 +210,10 @@ final class PanelViewController: NSViewController {
         showTask?.cancel()
         hideTask?.cancel()
         mouseOnPreview = false
+        sidebarOpen = false
         preview.hide()
+        finishClose()
+        clearFooter()
         for v in list.arrangedSubviews {
             list.removeArrangedSubview(v)
             v.removeFromSuperview()
@@ -253,21 +263,43 @@ final class PanelViewController: NSViewController {
 
     // MARK: Window size
 
-    /// Window = main column (+ sidebar on its left while previewing).
-    /// Right edge and top edge stay fixed; the sidebar always has the main column's height.
-    private func layoutWindow() {
-        let wide = preview.isVisible
-        let side: CGFloat = wide ? PreviewController.width : 0
-        let w = UI.width + side
+    /// Window = main column (+ sidebar on its left while open). Right edge and top edge stay fixed.
+    /// A width change (sidebar opening or closing) slides; everything else is instant.
+    private func layoutWindow(animated: Bool = false) {
+        let w = UI.width + (sidebarOpen ? PreviewController.width : 0)
         let h = mainHeight
+        let frame = NSRect(x: anchorRight - w, y: anchorTop - h, width: w, height: h)
 
-        popup.setFrame(
-            NSRect(x: anchorRight - w, y: anchorTop - h, width: w, height: h), display: true)
         preview.view.frame = NSRect(x: 0, y: 0, width: PreviewController.width, height: h)
-        divider.frame = NSRect(x: max(side - 1, 0), y: 0, width: 1, height: h)
-        divider.isHidden = !wide
-        mainBox.frame = NSRect(x: side, y: 0, width: UI.width, height: h)
-        popup.invalidateShadow()
+        divider.frame = NSRect(x: PreviewController.width - 1, y: 0, width: 1, height: h)
+        mainBox.frame.size.height = h
+        if sidebarOpen { divider.isHidden = false }
+
+        if animated, abs(popup.frame.width - w) > 0.5 {
+            NSAnimationContext.runAnimationGroup(
+                { ctx in
+                    ctx.duration = 0.18
+                    ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                    popup.animator().setFrame(frame, display: true)
+                },
+                completionHandler: { [weak self] in
+                    MainActor.assumeIsolated {
+                        self?.finishClose()
+                        self?.popup.invalidateShadow()
+                    }
+                })
+        } else {
+            popup.setFrame(frame, display: true)
+            finishClose()
+            popup.invalidateShadow()
+        }
+    }
+
+    /// After the sidebar has slid shut: hide the divider and free the content.
+    private func finishClose() {
+        guard !sidebarOpen else { return }
+        divider.isHidden = true
+        preview.finishHide()
     }
 
     // MARK: List
@@ -289,7 +321,7 @@ final class PanelViewController: NSViewController {
         } else {
             selected = min(max(oldIndex, 0), clips.count - 1)
         }
-
+        if footerActive { selected = -1 }  // a footer row owns the highlight
         applySelection(scroll: false)
         search.placeholderString = "Search \(store.totalCount()) items…"
         updateSize()
@@ -382,6 +414,7 @@ final class PanelViewController: NSViewController {
 
     private func hovered(_ index: Int) {
         guard Date() >= suppressHoverUntil else { return }
+        clearFooter()
         hideTask?.cancel()
         guard index != selected || !preview.isVisible else { return }
         selected = index
@@ -391,6 +424,7 @@ final class PanelViewController: NSViewController {
 
     private func move(_ delta: Int) {
         guard !clips.isEmpty else { return }
+        clearFooter()
         selected = min(max(selected + delta, 0), clips.count - 1)
         suppressHoverUntil = Date().addingTimeInterval(0.3)  // rows scroll under a resting mouse
         applySelection(scroll: true)
@@ -412,6 +446,23 @@ final class PanelViewController: NSViewController {
     private func deleteSelected() {
         guard selected >= 0, selected < clips.count else { return }
         store.delete(clips[selected].id)  // storeChanged() reselects the neighbour and refreshes the sidebar
+    }
+
+    /// Mouse entered a footer row: it takes the highlight, the list gives up its selection.
+    private func footerHovered(_ row: MenuRow) {
+        guard isOpen, Date() >= suppressHoverUntil else { return }
+        showTask?.cancel()
+        hideTask?.cancel()
+        footerActive = true
+        selected = -1
+        applySelection(scroll: false)
+        hidePreview()
+        for r in footerRows { r.setHighlighted(r === row) }
+    }
+
+    private func clearFooter() {
+        footerActive = false
+        for r in footerRows { r.setHighlighted(false) }
     }
 
     // MARK: Preview
@@ -442,8 +493,9 @@ final class PanelViewController: NSViewController {
         let image: NSImage? =
             clip.kind == .image
             ? ImageTools.loadImage(at: store.imageURL(clip), maxPixel: Config.previewPixels) : nil
+        sidebarOpen = true
         preview.show(clip: clip, text: text, image: image)
-        layoutWindow()
+        layoutWindow(animated: true)
     }
 
     /// Short grace period so the mouse can travel from the row onto the sidebar (to reach pin/delete).
@@ -465,13 +517,15 @@ final class PanelViewController: NSViewController {
     }
 
     private func dismissPreview() {
+        sidebarOpen = false
         preview.hide()
-        if popup.isVisible { layoutWindow() }
+        if popup.isVisible { layoutWindow(animated: true) } else { finishClose() }
     }
 
     // MARK: Actions
 
     @objc private func searchChanged() {
+        clearFooter()
         hidePreview()
         reload(reset: true)
     }

@@ -170,6 +170,7 @@ final class IconButton: NSButton {
 @MainActor
 final class MenuRow: NSView {
     var onClick: (@MainActor () -> Void)?
+    var onHover: (@MainActor () -> Void)?
 
     private let icon = NSImageView()
     private let label = NSTextField(labelWithString: "")
@@ -204,7 +205,7 @@ final class MenuRow: NSView {
 
     required init?(coder: NSCoder) { fatalError("not used") }
 
-    func resetHover() { hovering = false }
+    func setHighlighted(_ on: Bool) { hovering = on }
 
     private func refresh() {
         layer?.backgroundColor = hovering ? NSColor.controlAccentColor.cgColor : nil
@@ -223,8 +224,7 @@ final class MenuRow: NSView {
         tracking = area
     }
 
-    override func mouseEntered(with event: NSEvent) { hovering = true }
-    override func mouseExited(with event: NSEvent) { hovering = false }
+    override func mouseEntered(with event: NSEvent) { onHover?() }
     override func mouseDown(with event: NSEvent) {}
     override func mouseUp(with event: NSEvent) {
         if bounds.contains(convert(event.locationInWindow, from: nil)) { onClick?() }
