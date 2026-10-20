@@ -6,9 +6,11 @@ final class PopupPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
-/// Window background that reports when the mouse enters or leaves the whole popup.
+/// Window background that reports when the mouse enters or leaves the whole popup,
+/// and tells the panel about every size change (including each frame of the open/close animation).
 final class PopupRootView: NSVisualEffectView {
     var onMouse: (@MainActor (Bool) -> Void)?
+    var onResize: (@MainActor (NSSize) -> Void)?
     private var tracking: NSTrackingArea?
 
     override func updateTrackingAreas() {
@@ -24,6 +26,9 @@ final class PopupRootView: NSVisualEffectView {
 
     override func mouseEntered(with event: NSEvent) { onMouse?(true) }
     override func mouseExited(with event: NSEvent) { onMouse?(false) }
+
+    /// Replaces autoresizing: the panel places its columns itself on every size change.
+    override func resizeSubviews(withOldSize oldSize: NSSize) { onResize?(bounds.size) }
 }
 
 /// One translucent window: [ sidebar (preview) | main column ].
@@ -90,11 +95,6 @@ final class PanelViewController: NSViewController {
 
         preview.onPin = { [weak self] in self?.togglePinSelected() }
         preview.onDelete = { [weak self] in self?.deleteSelected() }
-        preview.onMouseInside = { [weak self] inside in
-            guard let self else { return }
-            self.mouseOnPreview = inside
-            if inside { self.hideTask?.cancel() } else { self.scheduleHide() }
-        }
     }
 
     required init?(coder: NSCoder) { fatalError("not used") }
@@ -115,6 +115,7 @@ final class PanelViewController: NSViewController {
             guard let self else { return }
             if inside { self.hideTask?.cancel() } else { self.scheduleHide() }
         }
+        root.onResize = { [weak self] size in self?.placeColumns(size) }
 
         // Header: app name + search field
         search.placeholderString = "Type to search…"
@@ -186,14 +187,14 @@ final class PanelViewController: NSViewController {
 
         divider.boxType = .separator
         divider.isHidden = true
+        mainBox.autoresizingMask = []
+        preview.view.autoresizingMask = []
 
-        preview.view.frame = NSRect(x: 0, y: 0, width: PreviewController.width, height: 300)
-
-        // Columns are positioned by frame in layoutWindow(), not by constraints.
+        // Columns are placed by frame in placeColumns(), not by constraints or autoresizing.
         root.addSubview(preview.view)
-        root.addSubview(divider)
         root.addSubview(mainBox)
-        mainBox.autoresizingMask = [.minXMargin]  // main column stays glued to the right edge
+        root.addSubview(divider)
+        placeColumns(root.bounds.size)
         popup.contentView = root
     }
 
@@ -295,23 +296,31 @@ final class PanelViewController: NSViewController {
 
     // MARK: Window size
 
+    /// Main column: fixed width, always at the right. Sidebar: the space left of it, with its content
+    /// pinned against the main column, so nothing overlaps or squeezes while the window grows or shrinks.
+    /// Called on every size change of the window, including each frame of the open/close animation.
+    private func placeColumns(_ size: NSSize) {
+        let side = max(size.width - UI.width, 0)
+        let h = size.height
+        mainBox.frame = NSRect(x: side, y: 0, width: UI.width, height: h)
+        preview.view.frame = NSRect(
+            x: side - PreviewController.width, y: 0, width: PreviewController.width, height: h)
+        divider.frame = NSRect(x: max(side - 1, 0), y: 0, width: 1, height: h)
+        divider.isHidden = side < 1
+    }
+
     /// Window = main column (+ sidebar on its left while open). Right edge and top edge stay fixed.
-    /// A width change (sidebar opening or closing) slides; everything else is instant.
+    /// Only a width change (sidebar opening or closing) animates; everything else is instant.
     private func layoutWindow(animated: Bool = false) {
         let w = UI.width + (sidebarOpen ? PreviewController.width : 0)
         let h = mainHeight
         let frame = NSRect(x: anchorRight - w, y: anchorTop - h, width: w, height: h)
 
-        preview.view.frame = NSRect(x: 0, y: 0, width: PreviewController.width, height: h)
-        divider.frame = NSRect(x: PreviewController.width - 1, y: 0, width: 1, height: h)
-        mainBox.frame.size.height = h
-        if sidebarOpen { divider.isHidden = false }
-
-        if animated, abs(popup.frame.width - w) > 0.5 {
+        if animated, popup.isVisible, abs(popup.frame.width - w) > 0.5 {
             NSAnimationContext.runAnimationGroup(
                 { ctx in
-                    ctx.duration = 0.18
-                    ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                    ctx.duration = 0.25
+                    ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
                     popup.animator().setFrame(frame, display: true)
                 },
                 completionHandler: { [weak self] in
@@ -327,10 +336,9 @@ final class PanelViewController: NSViewController {
         }
     }
 
-    /// After the sidebar has slid shut: hide the divider and free the content.
+    /// After the sidebar has slid shut: free the content (and any decoded image).
     private func finishClose() {
         guard !sidebarOpen else { return }
-        divider.isHidden = true
         preview.finishHide()
     }
 
@@ -544,7 +552,7 @@ final class PanelViewController: NSViewController {
         layoutWindow(animated: true)
     }
 
-    /// Short grace period so the mouse can travel from the row onto the sidebar (to reach pin/delete).
+    /// Short grace period before the sidebar closes when the mouse leaves the whole window.
     private func scheduleHide() {
         showTask?.cancel()
         hideTask?.cancel()
