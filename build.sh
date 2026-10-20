@@ -18,6 +18,8 @@ while pgrep -x ClipBar >/dev/null; do sleep 0.1; done
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/ClipBar"
+mkdir -p "$APP/Contents/Resources"
+cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 # Icon skipped for now. To add one later: put Resources/AppIcon.icns in place, copy it to
 # "$APP/Contents/Resources/" here and add <key>CFBundleIconFile</key><string>AppIcon</string> to the plist.
 
@@ -29,6 +31,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundleName</key><string>ClipBar</string>
   <key>CFBundleDisplayName</key><string>ClipBar</string>
   <key>CFBundleExecutable</key><string>ClipBar</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>1.0.0</string>
   <key>CFBundleVersion</key><string>1</string>
