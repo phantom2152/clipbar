@@ -29,7 +29,7 @@ final class SettingsWindowController: NSWindowController {
 
         let window = NSWindow(contentViewController: tabs)
         window.styleMask = [.titled, .closable]
-        window.title = "ClipBar Settings"
+        window.title = "General"
         window.isReleasedWhenClosed = false
         super.init(window: window)
     }

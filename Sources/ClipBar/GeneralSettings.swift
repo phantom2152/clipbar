@@ -3,6 +3,14 @@ import ServiceManagement
 
 @MainActor
 final class GeneralSettingsViewController: NSViewController {
+    init() {
+        super.init(nibName: nil, bundle: nil)
+        title = "General"
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("not used")
+    }
     private let launchCheck = NSButton(
         checkboxWithTitle: "Launch ClipBar at login", target: nil, action: nil)
     private let searchPopup = NSPopUpButton(frame: .zero, pullsDown: false)
