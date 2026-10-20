@@ -1,6 +1,13 @@
 import AppKit
 
-/// The popover: search field, history list, footer. Hovering a row opens the side preview.
+/// Borderless window that can take key focus (so the search field works).
+final class PopupPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+}
+
+/// One translucent window: [ sidebar (preview) | main column ].
+/// The sidebar has the same height and top edge as the main column and grows out to the left on hover.
 @MainActor
 final class PanelViewController: NSViewController {
     var onClose: (@MainActor () -> Void)?
@@ -9,8 +16,9 @@ final class PanelViewController: NSViewController {
 
     private let store: ClipStore
     private let preview = PreviewController()
+    private let popup: PopupPanel
 
-    // State (only alive while the popover is open)
+    // State (only alive while the panel is open)
     private var clips: [Clip] = []
     private var rows: [ClipRow] = []
     private var selected = -1
@@ -20,17 +28,38 @@ final class PanelViewController: NSViewController {
     private var showTask: Task<Void, Never>?
     private var hideTask: Task<Void, Never>?
 
+    // Window placement
+    private var anchorRight: CGFloat = 0  // right edge of the main column (screen coords)
+    private var anchorTop: CGFloat = 0  // top edge of the window (screen coords)
+    private var mainHeight: CGFloat = 300
+    private let minMainHeight: CGFloat = 250  // keeps enough room for the sidebar's meta block
+
     // Views
     private let search = NSSearchField()
     private let list = FlippedStackView()
+    private let divider = NSBox()
+    private let mainBox = NSView(frame: NSRect(x: 0, y: 0, width: UI.width, height: 300))
     private var scroll: NSScrollView!
     private var scrollHeight: NSLayoutConstraint!
-    private var stack: NSStackView!
-    private let countLabel = UI.label("", size: 11, color: .tertiaryLabelColor)
+    private var mainStack: NSStackView!
+
+    var isShown: Bool { popup.isVisible }
 
     init(store: ClipStore) {
         self.store = store
+        popup = PopupPanel(
+            contentRect: NSRect(x: 0, y: 0, width: UI.width, height: 300),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered, defer: false)
         super.init(nibName: nil, bundle: nil)
+
+        popup.isOpaque = false
+        popup.backgroundColor = .clear
+        popup.hasShadow = true
+        popup.level = .popUpMenu
+        popup.hidesOnDeactivate = false
+        popup.isReleasedWhenClosed = false
+        popup.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
         preview.onPin = { [weak self] in self?.togglePinSelected() }
         preview.onDelete = { [weak self] in self?.deleteSelected() }
@@ -46,15 +75,27 @@ final class PanelViewController: NSViewController {
     // MARK: View construction
 
     override func loadView() {
-        let root = NSView(frame: NSRect(x: 0, y: 0, width: UI.width, height: 300))
+        // Translucent background. Try .hudWindow (darker) or .underWindowBackground for a different feel.
+        let root = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: UI.width, height: 300))
+        root.material = .menu
+        root.state = .active
+        root.blendingMode = .behindWindow
+        root.wantsLayer = true
+        root.layer?.cornerRadius = 10
+        root.layer?.masksToBounds = true
         view = root
 
+        // Header: app name + search field
         search.placeholderString = "Type to search…"
         search.sendsSearchStringImmediately = true
         search.target = self
         search.action = #selector(searchChanged)
-        UI.fixedWidth(search)
+        search.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+        let title = UI.label("ClipBar", size: 13, weight: .semibold, color: .secondaryLabelColor)
+        let header = UI.row([title, search], spacing: 8)
+        header.edgeInsets = NSEdgeInsets(top: 0, left: 10, bottom: 0, right: 0)
 
+        // History list
         list.orientation = .vertical
         list.alignment = .leading
         list.spacing = 2
@@ -76,34 +117,65 @@ final class PanelViewController: NSViewController {
             list.trailingAnchor.constraint(equalTo: clip.trailingAnchor),
         ])
 
-        let clearBtn = UI.footerButton(
-            "Clear", symbol: "trash", target: self, action: #selector(clearTapped))
-        let folderBtn = UI.footerButton(
-            "Data folder", symbol: "folder", target: self, action: #selector(openFolderTapped))
-        let quitBtn = UI.footerButton(
-            "Quit", symbol: "power", target: self, action: #selector(quitTapped))
-        countLabel.setContentCompressionResistancePriority(
-            NSLayoutConstraint.Priority(1), for: .horizontal)
-        let footer = UI.row([clearBtn, folderBtn, UI.spacer(), countLabel, quitBtn], spacing: 10)
-
-        stack = NSStackView(views: [search, scroll, UI.separator(), footer])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 6
-        stack.edgeInsets = NSEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        stack.widthAnchor.constraint(equalToConstant: UI.width).isActive = true
-        root.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: root.topAnchor),
-            stack.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+        // Footer: stacked rows
+        let footer = NSStackView(views: [
+            menuRow("Clear", symbol: "trash", action: #selector(clearTapped)),
+            menuRow("Data folder", symbol: "folder", action: #selector(openFolderTapped)),
+            menuRow("Settings", symbol: "gearshape", action: #selector(settingsTapped)),
+            menuRow("Quit", symbol: "power", action: #selector(quitTapped)),
         ])
+        footer.orientation = .vertical
+        footer.alignment = .leading
+        footer.spacing = 0
+
+        mainStack = NSStackView(views: [header, scroll, UI.separator(), footer])
+        mainStack.orientation = .vertical
+        mainStack.alignment = .leading
+        mainStack.spacing = 6
+        mainStack.edgeInsets = NSEdgeInsets(top: 8, left: 8, bottom: 8, right: 8)
+        mainStack.translatesAutoresizingMaskIntoConstraints = false
+        mainBox.addSubview(mainStack)
+        NSLayoutConstraint.activate([
+            mainStack.topAnchor.constraint(equalTo: mainBox.topAnchor),
+            mainStack.leadingAnchor.constraint(equalTo: mainBox.leadingAnchor),
+            mainStack.widthAnchor.constraint(equalToConstant: UI.width),
+        ])
+
+        divider.boxType = .separator
+        divider.isHidden = true
+
+        preview.view.frame = NSRect(x: 0, y: 0, width: PreviewController.width, height: 300)
+
+        // Columns are positioned by frame in layoutWindow(), not by constraints.
+        root.addSubview(preview.view)
+        root.addSubview(divider)
+        root.addSubview(mainBox)
+        popup.contentView = root
+    }
+
+    /// One full-width, borderless row for the footer.
+    private func menuRow(_ title: String, symbol: String, action: Selector) -> NSView {
+        let b = UI.footerButton(title, symbol: symbol, target: self, action: action)
+        b.font = .systemFont(ofSize: 13)
+        b.contentTintColor = .labelColor
+        b.alignment = .left
+        b.translatesAutoresizingMaskIntoConstraints = false
+
+        let box = NSView()
+        box.addSubview(b)
+        NSLayoutConstraint.activate([
+            b.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 10),
+            b.trailingAnchor.constraint(equalTo: box.trailingAnchor),
+            b.topAnchor.constraint(equalTo: box.topAnchor),
+            b.bottomAnchor.constraint(equalTo: box.bottomAnchor),
+            box.heightAnchor.constraint(equalToConstant: 24),
+        ])
+        return UI.fixedWidth(box)
     }
 
     // MARK: Called by the app
 
-    /// Before the popover is shown: fill the list so it opens at the right height.
+    /// Before the panel is shown: fill the list so it opens at the right height.
     func prepareForOpen() {
         isOpen = true
         suppressHoverUntil = Date().addingTimeInterval(0.4)  // a resting mouse must not steal the selection
@@ -111,11 +183,27 @@ final class PanelViewController: NSViewController {
         reload(reset: true)
     }
 
-    func focusSearch() { view.window?.makeFirstResponder(search) }
+    /// Places the window under the menu bar icon and shows it.
+    func show(below button: NSView) {
+        guard let bw = button.window else { return }
+        let b = bw.convertToScreen(button.convert(button.bounds, to: nil))
+        let visible =
+            (bw.screen ?? NSScreen.main)?.visibleFrame
+            ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let mainX = min(max(b.midX - UI.width / 2, visible.minX + 6), visible.maxX - UI.width - 6)
+        anchorRight = mainX + UI.width
+        anchorTop = b.minY - 4
+        layoutWindow()
+        popup.makeKeyAndOrderFront(nil)
+        popup.orderFrontRegardless()
+    }
 
-    /// Popover closed: drop every row and image so nothing stays in memory.
+    func focusSearch() { popup.makeFirstResponder(search) }
+
+    /// Panel closed: drop every row and image so nothing stays in memory.
     func didClose() {
         isOpen = false
+        popup.orderOut(nil)
         showTask?.cancel()
         hideTask?.cancel()
         mouseOnPreview = false
@@ -132,7 +220,7 @@ final class PanelViewController: NSViewController {
 
     func storeChanged() { reload(reset: false) }
 
-    /// Keyboard shortcuts while the popover is open. Returns true if the key was used.
+    /// Keyboard shortcuts while the panel is open. Returns true if the key was used.
     func handleKey(code: UInt16, flags: NSEvent.ModifierFlags, chars: String) -> Bool {
         guard isOpen else { return false }
         let cmd = flags.contains(.command)
@@ -167,6 +255,25 @@ final class PanelViewController: NSViewController {
         return false
     }
 
+    // MARK: Window size
+
+    /// Window = main column (+ sidebar on its left while previewing).
+    /// Right edge and top edge stay fixed; the sidebar always has the main column's height.
+    private func layoutWindow() {
+        let wide = preview.isVisible
+        let side: CGFloat = wide ? PreviewController.width : 0
+        let w = UI.width + side
+        let h = mainHeight
+
+        popup.setFrame(
+            NSRect(x: anchorRight - w, y: anchorTop - h, width: w, height: h), display: true)
+        preview.view.frame = NSRect(x: 0, y: 0, width: PreviewController.width, height: h)
+        divider.frame = NSRect(x: max(side - 1, 0), y: 0, width: 1, height: h)
+        divider.isHidden = !wide
+        mainBox.frame = NSRect(x: side, y: 0, width: UI.width, height: h)
+        popup.invalidateShadow()
+    }
+
     // MARK: List
 
     private func reload(reset: Bool) {
@@ -188,7 +295,7 @@ final class PanelViewController: NSViewController {
         }
 
         applySelection(scroll: false)
-        countLabel.stringValue = "\(store.totalCount()) items"
+        search.placeholderString = "Search \(store.totalCount()) items…"
         updateSize()
 
         if preview.isVisible {
@@ -230,25 +337,32 @@ final class PanelViewController: NSViewController {
     }
 
     private func updateSize() {
-        let height: CGFloat
+        let listHeight: CGFloat
         if rows.isEmpty {
-            height = 40
+            listHeight = 40
         } else {
-            height = rows.reduce(0) { $0 + $1.rowHeight } + list.spacing * CGFloat(rows.count - 1)
+            listHeight =
+                rows.reduce(0) { $0 + $1.rowHeight } + list.spacing * CGFloat(rows.count - 1)
         }
-        scrollHeight.constant = min(max(height, 40), 360)
-        stack.layoutSubtreeIfNeeded()
-        let total = stack.fittingSize.height
-        if abs(preferredContentSize.height - total) > 0.5 || preferredContentSize.width != UI.width
-        {
-            preferredContentSize = NSSize(width: UI.width, height: total)
+        scrollHeight.constant = min(max(listHeight, 40), 360)
+        mainStack.layoutSubtreeIfNeeded()
+
+        var total = mainStack.fittingSize.height
+        if total < minMainHeight {  // few items: pad the list area so the sidebar fits
+            scrollHeight.constant += minMainHeight - total
+            mainStack.layoutSubtreeIfNeeded()
+            total = minMainHeight
         }
+        mainHeight = total
+        if popup.isVisible { layoutWindow() }
     }
 
     // MARK: Selection
 
     private func hovered(_ index: Int) {
-        guard Date() >= suppressHoverUntil, index != selected || !preview.isVisible else { return }
+        guard Date() >= suppressHoverUntil else { return }
+        hideTask?.cancel()
+        guard index != selected || !preview.isVisible else { return }
         selected = index
         applySelection(scroll: false)
         schedulePreview()
@@ -262,7 +376,7 @@ final class PanelViewController: NSViewController {
         schedulePreview()
     }
 
-    /// Copies the item back to the clipboard (it jumps to the top) and closes the popover.
+    /// Copies the item back to the clipboard (it jumps to the top) and closes the panel.
     private func choose(_ index: Int) {
         guard index >= 0, index < clips.count else { return }
         store.copyToPasteboard(clips[index])
@@ -303,23 +417,24 @@ final class PanelViewController: NSViewController {
     }
 
     private func showPreview() {
-        guard selected >= 0, selected < clips.count, let window = view.window else { return }
+        guard selected >= 0, selected < clips.count else { return }
         let clip = clips[selected]
         let text: String? = clip.kind == .image ? nil : store.fullText(clip.id)
         let image: NSImage? =
             clip.kind == .image
             ? ImageTools.loadImage(at: store.imageURL(clip), maxPixel: Config.previewPixels) : nil
-        preview.show(clip: clip, text: text, image: image, beside: window.frame)
+        preview.show(clip: clip, text: text, image: image)
+        layoutWindow()
     }
 
-    /// Short grace period so the mouse can travel from the row onto the preview (to reach pin/delete).
+    /// Short grace period so the mouse can travel from the row onto the sidebar (to reach pin/delete).
     private func scheduleHide() {
         showTask?.cancel()
         hideTask?.cancel()
         hideTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 250_000_000)
             guard !Task.isCancelled, let self, !self.mouseOnPreview else { return }
-            self.preview.hide()
+            self.dismissPreview()
         }
     }
 
@@ -327,7 +442,12 @@ final class PanelViewController: NSViewController {
         showTask?.cancel()
         hideTask?.cancel()
         mouseOnPreview = false
+        dismissPreview()
+    }
+
+    private func dismissPreview() {
         preview.hide()
+        if popup.isVisible { layoutWindow() }
     }
 
     // MARK: Actions
@@ -351,8 +471,10 @@ final class PanelViewController: NSViewController {
         alert.addButton(withTitle: "Cancel")
 
         onModalBusy?(true)
+        popup.level = .normal  // so the alert is never hidden behind the panel
         NSApp.activate(ignoringOtherApps: true)
         let response = alert.runModal()
+        popup.level = .popUpMenu
         onModalBusy?(false)
         if response == .alertFirstButtonReturn { store.clearUnpinned() }
     }
@@ -360,6 +482,11 @@ final class PanelViewController: NSViewController {
     @objc private func openFolderTapped() {
         NSWorkspace.shared.open(Config.dataDirectory)
         onClose?()
+    }
+
+    /// Placeholder: nothing to configure yet.
+    @objc private func settingsTapped() {
+        // TODO: open a settings window
     }
 
     @objc private func quitTapped() { onQuit?() }

@@ -1,13 +1,7 @@
 import AppKit
 
-/// Panel that never takes focus, so typing in the search field keeps working.
-final class NonKeyPanel: NSPanel {
-    override var canBecomeKey: Bool { false }
-    override var canBecomeMain: Bool { false }
-}
-
-/// Blurred background that reports when the mouse is over it.
-final class HoverEffectView: NSVisualEffectView {
+/// Plain view that reports when the mouse is over it.
+final class HoverView: NSView {
     var onMouse: (@MainActor (Bool) -> Void)?
     private var tracking: NSTrackingArea?
 
@@ -26,94 +20,119 @@ final class HoverEffectView: NSVisualEffectView {
     override func mouseExited(with event: NSEvent) { onMouse?(false) }
 }
 
-/// The side panel shown next to the popover: full preview, details, pin and delete.
+/// The sidebar: [pin/delete header] [scrollable content] [fixed meta block].
+/// It is a plain view; PanelViewController sets its frame (same height as the main column).
 @MainActor
 final class PreviewController: NSObject {
+    static let width: CGFloat = 300
+
     var onPin: (@MainActor () -> Void)?
     var onDelete: (@MainActor () -> Void)?
     var onMouseInside: (@MainActor (Bool) -> Void)?
 
-    private let panel: NonKeyPanel
-    private let box = HoverEffectView()
-    private let stack = NSStackView()
-    private let panelWidth: CGFloat = 300
-    private let contentWidth: CGFloat = 276
+    let view = HoverView(frame: NSRect(x: 0, y: 0, width: 300, height: 300))
+    private(set) var isVisible = false
 
-    var isVisible: Bool { panel.isVisible }
+    private let contentWidth: CGFloat = 276  // sidebar width minus 12pt insets
+    private let textWidth: CGFloat = 268  // a little narrower, leaves room for the scroller
+
+    private var pin: IconButton!
+    private var trash: IconButton!
+    private let scroll = NSScrollView()
+    private let content = FlippedStackView()  // scrolling body
+    private let meta = NSStackView()  // fixed details at the bottom
 
     override init() {
-        panel = NonKeyPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 300, height: 200),
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered, defer: false)
         super.init()
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.hasShadow = true
-        panel.level = .popUpMenu
-        panel.hidesOnDeactivate = false
-        panel.isReleasedWhenClosed = false
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        view.isHidden = true
+        view.onMouse = { [weak self] inside in self?.onMouseInside?(inside) }
 
-        box.material = .popover
-        box.state = .active
-        box.blendingMode = .behindWindow
-        box.wantsLayer = true
-        box.layer?.cornerRadius = 10
-        box.layer?.masksToBounds = true
-        box.onMouse = { [weak self] inside in self?.onMouseInside?(inside) }
-        panel.contentView = box
+        pin = IconButton(
+            symbol: "pin", tooltip: "Pin", side: 26, symbolSize: 13,
+            target: self, action: #selector(pinTapped))
+        trash = IconButton(
+            symbol: "trash", tooltip: "Delete", side: 26, symbolSize: 13,
+            target: self, action: #selector(deleteTapped))
+        let header = UI.row([UI.spacer(), pin, trash], spacing: 2, width: contentWidth)
 
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 8
-        stack.edgeInsets = NSEdgeInsets(top: 10, left: 12, bottom: 12, right: 12)
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        box.addSubview(stack)
+        // Scrollable body
+        content.orientation = .vertical
+        content.alignment = .leading
+        content.spacing = 8
+        content.translatesAutoresizingMaskIntoConstraints = false
+
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.drawsBackground = false
+        scroll.borderType = .noBorder
+        scroll.documentView = content
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.widthAnchor.constraint(equalToConstant: contentWidth).isActive = true
+        // The scroll area takes all the space the header and meta block don't need.
+        scroll.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .vertical)
+        scroll.setContentCompressionResistancePriority(
+            NSLayoutConstraint.Priority(1), for: .vertical)
+        let clip = scroll.contentView
         NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: box.topAnchor),
-            stack.leadingAnchor.constraint(equalTo: box.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: box.trailingAnchor),
-            stack.widthAnchor.constraint(equalToConstant: panelWidth),
+            content.topAnchor.constraint(equalTo: clip.topAnchor),
+            content.leadingAnchor.constraint(equalTo: clip.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: clip.trailingAnchor),
+        ])
+
+        // Fixed meta block
+        meta.orientation = .vertical
+        meta.alignment = .leading
+        meta.spacing = 4
+        UI.fixedWidth(meta, contentWidth)
+
+        let column = NSStackView(views: [header, scroll, UI.separator(width: contentWidth), meta])
+        column.orientation = .vertical
+        column.alignment = .leading
+        column.distribution = .fill
+        column.spacing = 8
+        column.edgeInsets = NSEdgeInsets(top: 10, left: 12, bottom: 12, right: 12)
+        column.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(column)
+
+        let bottom = column.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        bottom.priority = NSLayoutConstraint.Priority(750)
+        NSLayoutConstraint.activate([
+            column.topAnchor.constraint(equalTo: view.topAnchor),
+            column.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            column.widthAnchor.constraint(equalToConstant: Self.width),
+            bottom,
         ])
     }
 
-    func hide() { panel.orderOut(nil) }
+    /// Drops the content (and any decoded image) so nothing stays in memory.
+    func hide() {
+        guard isVisible else { return }
+        isVisible = false
+        view.isHidden = true
+        clear(content)
+        clear(meta)
+    }
 
-    /// `anchor` is the popover window's frame; the panel opens beside it.
-    func show(clip: Clip, text: String?, image: NSImage?, beside anchor: NSRect) {
-        for v in stack.arrangedSubviews {
-            stack.removeArrangedSubview(v)
-            v.removeFromSuperview()
-        }
+    func show(clip: Clip, text: String?, image: NSImage?) {
+        pin.setSymbol(clip.pinned ? "pin.slash" : "pin")
+        pin.toolTip = clip.pinned ? "Unpin" : "Pin"
 
-        // Header: pin + delete, right aligned
-        let pin = IconButton(
-            symbol: clip.pinned ? "pin.slash" : "pin",
-            tooltip: clip.pinned ? "Unpin" : "Pin",
-            side: 26, symbolSize: 13, target: self, action: #selector(pinTapped))
-        let trash = IconButton(
-            symbol: "trash", tooltip: "Delete",
-            side: 26, symbolSize: 13, target: self, action: #selector(deleteTapped))
-        stack.addArrangedSubview(
-            UI.row([UI.spacer(), pin, trash], spacing: 2, width: contentWidth))
-
-        // Body: whole text (first part) or the image
+        // Scrollable body
+        clear(content)
         switch clip.kind {
         case .text:
-            let shown = String((text ?? clip.preview).prefix(3000))
-            let t = NSTextField(wrappingLabelWithString: shown)
-            t.font = .systemFont(ofSize: 12)
-            t.maximumNumberOfLines = 16
-            t.lineBreakMode = .byTruncatingTail
-            t.cell?.truncatesLastVisibleLine = true
-            t.preferredMaxLayoutWidth = contentWidth
-            UI.fixedWidth(t, contentWidth)
-            stack.addArrangedSubview(t)
+            let shown = String((text ?? clip.preview).prefix(5000))
+            content.addArrangedSubview(bodyText(shown, truncate: .byTruncatingTail))
+        case .file:
+            let paths = (text ?? "").split(separator: "\n").compactMap {
+                URL(string: String($0))?.path
+            }
+            content.addArrangedSubview(
+                bodyText(paths.prefix(50).joined(separator: "\n"), truncate: .byTruncatingMiddle))
         case .image:
             if let image {
                 let px = image.size
-                let scale = min(contentWidth / max(px.width, 1), 240 / max(px.height, 1), 1)
+                let scale = min(textWidth / max(px.width, 1), 1)
                 let v = NSImageView()
                 v.image = image
                 v.imageScaling = .scaleProportionallyUpOrDown
@@ -122,44 +141,48 @@ final class PreviewController: NSObject {
                     v.widthAnchor.constraint(equalToConstant: max(1, px.width * scale)),
                     v.heightAnchor.constraint(equalToConstant: max(1, px.height * scale)),
                 ])
-                stack.addArrangedSubview(v)
+                content.addArrangedSubview(v)
             } else {
-                stack.addArrangedSubview(
-                    UI.paragraph("Image file not found.", size: 12, width: contentWidth))
+                content.addArrangedSubview(
+                    UI.paragraph("Image file not found.", size: 12, width: textWidth))
             }
-        case .file:
-            let paths = (text ?? "").split(separator: "\n").compactMap {
-                URL(string: String($0))?.path
-            }
-            let t = NSTextField(wrappingLabelWithString: paths.prefix(20).joined(separator: "\n"))
-            t.font = .systemFont(ofSize: 12)
-            t.maximumNumberOfLines = 16
-            t.lineBreakMode = .byTruncatingMiddle
-            t.preferredMaxLayoutWidth = contentWidth
-            UI.fixedWidth(t, contentWidth)
-            stack.addArrangedSubview(t)
         }
 
-        stack.addArrangedSubview(UI.separator(width: contentWidth))
-
-        // Details
-        if !clip.source.isEmpty { stack.addArrangedSubview(info("Application", clip.source)) }
+        // Fixed meta block
+        clear(meta)
+        if !clip.source.isEmpty { meta.addArrangedSubview(appRow(clip)) }
         if clip.kind == .image {
-            stack.addArrangedSubview(info("Dimensions", "\(clip.width)×\(clip.height)"))
+            meta.addArrangedSubview(info("Dimensions", "\(clip.width)×\(clip.height)"))
         }
-        stack.addArrangedSubview(info("Size", Formats.bytes(clip.bytes)))
-        stack.addArrangedSubview(info("First copy time", Formats.full.string(from: clip.firstAt)))
-        stack.addArrangedSubview(info("Last copy time", Formats.full.string(from: clip.lastAt)))
-        stack.addArrangedSubview(info("Number of copies", "\(clip.copies)"))
+        meta.addArrangedSubview(info("Size", Formats.bytes(clip.bytes)))
+        meta.addArrangedSubview(info("First copy time", Formats.full.string(from: clip.firstAt)))
+        meta.addArrangedSubview(info("Last copy time", Formats.full.string(from: clip.lastAt)))
+        meta.addArrangedSubview(info("Number of copies", "\(clip.copies)"))
 
-        stack.layoutSubtreeIfNeeded()
-        let size = NSSize(width: panelWidth, height: stack.fittingSize.height)
-        panel.setContentSize(size)
-        panel.setFrameOrigin(origin(for: size, beside: anchor))
-        panel.orderFrontRegardless()
+        isVisible = true
+        view.isHidden = false
+
+        content.layoutSubtreeIfNeeded()
+        scroll.contentView.scroll(to: .zero)  // always start at the top
+        scroll.reflectScrolledClipView(scroll.contentView)
     }
 
     // MARK: Internals
+
+    private func clear(_ stack: NSStackView) {
+        for v in stack.arrangedSubviews {
+            stack.removeArrangedSubview(v)
+            v.removeFromSuperview()
+        }
+    }
+
+    private func bodyText(_ s: String, truncate: NSLineBreakMode) -> NSTextField {
+        let t = NSTextField(wrappingLabelWithString: s)
+        t.font = .systemFont(ofSize: 12)
+        t.lineBreakMode = .byWordWrapping
+        t.preferredMaxLayoutWidth = textWidth
+        return UI.fixedWidth(t, textWidth)
+    }
 
     private func info(_ key: String, _ value: String) -> NSTextField {
         let s = NSMutableAttributedString(
@@ -181,15 +204,46 @@ final class PreviewController: NSObject {
         return UI.fixedWidth(t, contentWidth)
     }
 
-    /// Left of the popover, top aligned; flips to the right side if there is no room.
-    private func origin(for size: NSSize, beside anchor: NSRect) -> NSPoint {
-        let screen = NSScreen.screens.first { $0.frame.intersects(anchor) } ?? NSScreen.main
-        let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        var x = anchor.minX - size.width - 4
-        if x < visible.minX + 4 { x = anchor.maxX + 4 }
-        let top = anchor.maxY - 14
-        let y = max(top - size.height, visible.minY + 4)
-        return NSPoint(x: x, y: y)
+    /// "Application: [icon] Name"
+    private func appRow(_ clip: Clip) -> NSView {
+        let key = NSTextField(labelWithString: "Application:")
+        key.font = .systemFont(ofSize: 11)
+        key.textColor = .secondaryLabelColor
+
+        let name = NSTextField(labelWithString: clip.source)
+        name.font = .systemFont(ofSize: 11)
+        name.textColor = .labelColor
+        name.lineBreakMode = .byTruncatingTail
+        name.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+        name.setContentCompressionResistancePriority(
+            NSLayoutConstraint.Priority(1), for: .horizontal)
+
+        var views: [NSView] = [key]
+        if let icon = Self.appIcon(for: clip) {
+            let v = NSImageView()
+            v.image = icon
+            v.imageScaling = .scaleProportionallyUpOrDown
+            v.translatesAutoresizingMaskIntoConstraints = false
+            v.widthAnchor.constraint(equalToConstant: 15).isActive = true
+            v.heightAnchor.constraint(equalToConstant: 15).isActive = true
+            views.append(v)
+        }
+        views.append(name)
+        return UI.row(views, spacing: 4, width: contentWidth)
+    }
+
+    /// Looked up on demand and never stored. Older entries (no bundle id saved) fall back to a running app with that name.
+    private static func appIcon(for clip: Clip) -> NSImage? {
+        var url: URL?
+        if !clip.sourceBundleID.isEmpty {
+            url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: clip.sourceBundleID)
+        } else {
+            url =
+                NSWorkspace.shared.runningApplications.first { $0.localizedName == clip.source }?
+                .bundleURL
+        }
+        guard let url else { return nil }
+        return NSWorkspace.shared.icon(forFile: url.path)
     }
 
     @objc private func pinTapped() { onPin?() }
