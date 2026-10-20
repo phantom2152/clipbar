@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var autoCloseSuspended = false  // true while an alert is up
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        installEditMenu()
         // Menu bar icon: left click toggles the panel, right click shows a tiny Quit menu
         if let button = item.button {
             button.target = self
@@ -103,6 +104,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             return handled ? nil : event
         }
+    }
+
+    /// Menu-bar apps have no Edit menu, so ⌘C/⌘V/⌘A never reached text fields. This one is never shown.
+    private func installEditMenu() {
+        let main = NSMenu()
+
+        let appItem = NSMenuItem()
+        let appMenu = NSMenu()
+        appMenu.addItem(
+            withTitle: "Quit ClipBar", action: #selector(NSApplication.terminate(_:)),
+            keyEquivalent: "q")
+        appItem.submenu = appMenu
+        main.addItem(appItem)
+
+        let editItem = NSMenuItem()
+        let edit = NSMenu(title: "Edit")
+        edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        let redo = edit.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "z")
+        redo.keyEquivalentModifierMask = [.command, .shift]
+        edit.addItem(.separator())
+        edit.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        edit.addItem(
+            withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editItem.submenu = edit
+        main.addItem(editItem)
+
+        NSApp.mainMenu = main
     }
 
     func applicationWillTerminate(_ notification: Notification) {

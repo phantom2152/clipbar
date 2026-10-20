@@ -6,6 +6,26 @@ final class PopupPanel: NSPanel {
     override var canBecomeMain: Bool { false }
 }
 
+/// Window background that reports when the mouse enters or leaves the whole popup.
+final class PopupRootView: NSVisualEffectView {
+    var onMouse: (@MainActor (Bool) -> Void)?
+    private var tracking: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let tracking { removeTrackingArea(tracking) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self, userInfo: nil)
+        addTrackingArea(area)
+        tracking = area
+    }
+
+    override func mouseEntered(with event: NSEvent) { onMouse?(true) }
+    override func mouseExited(with event: NSEvent) { onMouse?(false) }
+}
+
 /// One translucent window: [ sidebar (preview) | main column ].
 /// The sidebar has the same height and top edge as the main column and grows out to the left on hover.
 @MainActor
@@ -41,12 +61,13 @@ final class PanelViewController: NSViewController {
     private let list = FlippedStackView()
     private let divider = NSBox()
     private let mainBox = NSView(frame: NSRect(x: 0, y: 0, width: UI.width, height: 300))
+    private let pinnedStack = NSStackView()
+    private lazy var pinDivider: NSView = pinSeparator()
     private var scroll: NSScrollView!
     private var scrollHeight: NSLayoutConstraint!
     private var mainStack: NSStackView!
     private var footerRows: [MenuRow] = []
     private var footerActive = false
-    private var hasSeparator = false
     private let separatorHeight: CGFloat = 7
 
     var isShown: Bool { popup.isVisible }
@@ -81,8 +102,7 @@ final class PanelViewController: NSViewController {
     // MARK: View construction
 
     override func loadView() {
-        // Translucent background. Try .hudWindow (darker) or .underWindowBackground for a different feel.
-        let root = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: UI.width, height: 300))
+        let root = PopupRootView(frame: NSRect(x: 0, y: 0, width: UI.width, height: 300))
         root.material = .hudWindow
         root.state = .active
         root.blendingMode = .behindWindow
@@ -90,6 +110,11 @@ final class PanelViewController: NSViewController {
         root.layer?.cornerRadius = 10
         root.layer?.masksToBounds = true
         view = root
+
+        root.onMouse = { [weak self] inside in
+            guard let self else { return }
+            if inside { self.hideTask?.cancel() } else { self.scheduleHide() }
+        }
 
         // Header: app name + search field
         search.placeholderString = "Type to search…"
@@ -135,7 +160,18 @@ final class PanelViewController: NSViewController {
         footer.alignment = .leading
         footer.spacing = 0
 
-        mainStack = NSStackView(views: [header, scroll, UI.separator(), footer])
+        pinnedStack.orientation = .vertical
+        pinnedStack.alignment = .leading
+        pinnedStack.spacing = 2
+        UI.fixedWidth(pinnedStack)
+        pinnedStack.isHidden = true
+        pinDivider.isHidden = true
+
+        mainStack = NSStackView(views: [
+            header, pinnedStack, pinDivider, scroll, UI.separator(), footer,
+        ])
+        mainStack.setCustomSpacing(2, after: pinnedStack)
+        mainStack.setCustomSpacing(2, after: pinDivider)
         mainStack.orientation = .vertical
         mainStack.alignment = .leading
         mainStack.spacing = 6
@@ -214,11 +250,7 @@ final class PanelViewController: NSViewController {
         preview.hide()
         finishClose()
         clearFooter()
-        for v in list.arrangedSubviews {
-            list.removeArrangedSubview(v)
-            v.removeFromSuperview()
-        }
-        rows = []
+        clearRows()
         clips = []
         selected = -1
         search.stringValue = ""
@@ -331,13 +363,22 @@ final class PanelViewController: NSViewController {
         }
     }
 
-    private func rebuildRows() {
-        for v in list.arrangedSubviews {
-            list.removeArrangedSubview(v)
-            v.removeFromSuperview()
+    private func clearRows() {
+        for stack in [pinnedStack, list] as [NSStackView] {
+            for v in stack.arrangedSubviews {
+                stack.removeArrangedSubview(v)
+                v.removeFromSuperview()
+            }
         }
         rows = []
-        hasSeparator = false
+    }
+
+    private func rebuildRows() {
+        clearRows()
+        let hasPinned = clips.contains { $0.pinned }
+        let hasUnpinned = clips.contains { !$0.pinned }
+        pinnedStack.isHidden = !hasPinned
+        pinDivider.isHidden = !(hasPinned && hasUnpinned)
 
         if clips.isEmpty {
             let msg =
@@ -351,16 +392,9 @@ final class PanelViewController: NSViewController {
                 clip.kind == .image ? NSImage(contentsOf: store.thumbURL(clip)) : nil
             let row = ClipRow(clip: clip, shortcut: i < 9 ? i + 1 : nil, thumbnail: thumb)
             row.onHover = { [weak self] in self?.hovered(i) }
-            row.onExit = { [weak self] in self?.scheduleHide() }
             row.onClick = { [weak self] in self?.choose(i) }
-            list.addArrangedSubview(row)
+            (clip.pinned ? pinnedStack : list).addArrangedSubview(row)
             rows.append(row)
-
-            // line between the last pinned row and the first unpinned one
-            if clip.pinned, i + 1 < clips.count, !clips[i + 1].pinned {
-                list.addArrangedSubview(pinSeparator())
-                hasSeparator = true
-            }
         }
     }
 
@@ -389,19 +423,31 @@ final class PanelViewController: NSViewController {
     }
 
     private func updateSize() {
-        let listHeight: CGFloat
-        if rows.isEmpty {
-            listHeight = 40
-        } else {
-            listHeight =
-                rows.reduce(0) { $0 + $1.rowHeight } + list.spacing * CGFloat(rows.count - 1)
-                + (hasSeparator ? separatorHeight + list.spacing : 0)
+        var pinnedH: CGFloat = 0
+        var unpinnedH: CGFloat = 0
+        var pinnedN = 0
+        var unpinnedN = 0
+        for (i, row) in rows.enumerated() {
+            if clips[i].pinned {
+                pinnedH += row.rowHeight
+                pinnedN += 1
+            } else {
+                unpinnedH += row.rowHeight
+                unpinnedN += 1
+            }
         }
-        scrollHeight.constant = min(max(listHeight, 40), 360)
+        pinnedH += list.spacing * CGFloat(max(pinnedN - 1, 0))
+        unpinnedH += list.spacing * CGFloat(max(unpinnedN - 1, 0))
+
+        // Only the unpinned part scrolls; the pinned block eats into the 360pt cap.
+        let fixedH = pinnedN > 0 ? pinnedH + (unpinnedN > 0 ? separatorHeight + 4 : 0) : 0
+        let cap = max(360 - fixedH, 120)
+        let wanted: CGFloat = rows.isEmpty ? 40 : (unpinnedN > 0 ? max(unpinnedH, 40) : 0)
+        scrollHeight.constant = min(wanted, cap)
         mainStack.layoutSubtreeIfNeeded()
 
         var total = mainStack.fittingSize.height
-        if total < minMainHeight {  // few items: pad the list area so the sidebar fits
+        if total < minMainHeight {  // few items: pad so the sidebar's meta block fits
             scrollHeight.constant += minMainHeight - total
             mainStack.layoutSubtreeIfNeeded()
             total = minMainHeight
