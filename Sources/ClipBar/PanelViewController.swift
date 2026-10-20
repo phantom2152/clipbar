@@ -42,6 +42,7 @@ final class PanelViewController: NSViewController {
     private var scroll: NSScrollView!
     private var scrollHeight: NSLayoutConstraint!
     private var mainStack: NSStackView!
+    private var footerRows: [MenuRow] = []
 
     var isShown: Bool { popup.isVisible }
 
@@ -77,7 +78,7 @@ final class PanelViewController: NSViewController {
     override func loadView() {
         // Translucent background. Try .hudWindow (darker) or .underWindowBackground for a different feel.
         let root = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: UI.width, height: 300))
-        root.material = .menu
+        root.material = .hudWindow
         root.state = .active
         root.blendingMode = .behindWindow
         root.wantsLayer = true
@@ -118,12 +119,13 @@ final class PanelViewController: NSViewController {
         ])
 
         // Footer: stacked rows
-        let footer = NSStackView(views: [
-            menuRow("Clear", symbol: "trash", action: #selector(clearTapped)),
-            menuRow("Data folder", symbol: "folder", action: #selector(openFolderTapped)),
-            menuRow("Settings", symbol: "gearshape", action: #selector(settingsTapped)),
-            menuRow("Quit", symbol: "power", action: #selector(quitTapped)),
-        ])
+        footerRows = [
+            menuRow("Clear", symbol: "trash") { [weak self] in self?.clearTapped() },
+            menuRow("Data folder", symbol: "folder") { [weak self] in self?.openFolderTapped() },
+            menuRow("Settings", symbol: "gearshape") { [weak self] in self?.settingsTapped() },
+            menuRow("Quit", symbol: "power") { [weak self] in self?.quitTapped() },
+        ]
+        let footer = NSStackView(views: footerRows)
         footer.orientation = .vertical
         footer.alignment = .leading
         footer.spacing = 0
@@ -154,29 +156,20 @@ final class PanelViewController: NSViewController {
     }
 
     /// One full-width, borderless row for the footer.
-    private func menuRow(_ title: String, symbol: String, action: Selector) -> NSView {
-        let b = UI.footerButton(title, symbol: symbol, target: self, action: action)
-        b.font = .systemFont(ofSize: 13)
-        b.contentTintColor = .labelColor
-        b.alignment = .left
-        b.translatesAutoresizingMaskIntoConstraints = false
-
-        let box = NSView()
-        box.addSubview(b)
-        NSLayoutConstraint.activate([
-            b.leadingAnchor.constraint(equalTo: box.leadingAnchor, constant: 10),
-            b.trailingAnchor.constraint(equalTo: box.trailingAnchor),
-            b.topAnchor.constraint(equalTo: box.topAnchor),
-            b.bottomAnchor.constraint(equalTo: box.bottomAnchor),
-            box.heightAnchor.constraint(equalToConstant: 24),
-        ])
-        return UI.fixedWidth(box)
+    private func menuRow(
+        _ title: String, symbol: String,
+        action: @escaping @MainActor () -> Void
+    ) -> MenuRow {
+        let row = MenuRow(title: title, symbol: symbol)
+        row.onClick = action
+        return row
     }
 
     // MARK: Called by the app
 
     /// Before the panel is shown: fill the list so it opens at the right height.
     func prepareForOpen() {
+        footerRows.forEach { $0.resetHover() }
         isOpen = true
         suppressHoverUntil = Date().addingTimeInterval(0.4)  // a resting mouse must not steal the selection
         search.stringValue = ""
@@ -390,9 +383,7 @@ final class PanelViewController: NSViewController {
 
     private func deleteSelected() {
         guard selected >= 0, selected < clips.count else { return }
-        let id = clips[selected].id
-        hidePreview()
-        store.delete(id)
+        store.delete(clips[selected].id)  // storeChanged() reselects the neighbour and refreshes the sidebar
     }
 
     // MARK: Preview
@@ -469,6 +460,9 @@ final class PanelViewController: NSViewController {
             "This removes \(n) item\(n == 1 ? "" : "s") and their image files. Pinned items are kept."
         alert.addButton(withTitle: "Clear")
         alert.addButton(withTitle: "Cancel")
+        alert.buttons[0].hasDestructiveAction = true  // "Clear" is red
+        alert.buttons[0].bezelColor = .systemRed
+        for b in alert.buttons { b.keyEquivalent = "" }  // neither is default: Return and Esc do nothing
 
         onModalBusy?(true)
         popup.level = .normal  // so the alert is never hidden behind the panel
