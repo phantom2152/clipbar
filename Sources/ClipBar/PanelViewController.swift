@@ -35,7 +35,7 @@ final class PopupRootView: NSVisualEffectView {
 /// The sidebar has the same height and top edge as the main column and grows out to the left on hover.
 @MainActor
 final class PanelViewController: NSViewController {
-    var onClose: (@MainActor () -> Void)?
+    var onClose: (@MainActor (Bool) -> Void)?  // true = give focus back to the previous app
     var onQuit: (@MainActor () -> Void)?
     var onModalBusy: (@MainActor (Bool) -> Void)?  // true while an alert is up
     var onSettings: (@MainActor () -> Void)?
@@ -496,7 +496,7 @@ final class PanelViewController: NSViewController {
     private func choose(_ index: Int) {
         guard index >= 0, index < clips.count else { return }
         store.copyToPasteboard(clips[index])
-        onClose?()
+        onClose?(true)
     }
 
     private func togglePinSelected() {
@@ -625,7 +625,7 @@ final class PanelViewController: NSViewController {
 
     @objc private func openFolderTapped() {
         NSWorkspace.shared.open(Config.dataDirectory)
-        onClose?()
+        onClose?(false)  // Finder comes to the front instead
     }
 
     @objc private func settingsTapped() { onSettings?() }

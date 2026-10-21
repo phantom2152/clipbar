@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var clickMonitor: Any?
     private var keyMonitor: Any?
     private var autoCloseSuspended = false  // true while an alert is up
+    private var previousApp: NSRunningApplication?  // who had focus before the panel opened
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installEditMenu()
@@ -34,13 +35,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         store.monitor.start()
 
         panel = PanelViewController(store: store)
-        panel.onClose = { [weak self] in self?.closePopover() }
+        panel.onClose = { [weak self] restore in self?.closePopover(restoreFocus: restore) }
+
         panel.onQuit = { NSApp.terminate(nil) }
         panel.onModalBusy = { [weak self] busy in self?.autoCloseSuspended = busy }
         store.onChange = { [weak self] in self?.panel.storeChanged() }
         _ = panel.view
         panel.onSettings = { [weak self] in
-            self?.closePopover()  // the popup goes away, then the normal window opens
+            self?.closePopover(restoreFocus: false)  // Settings takes focus on purpose
             self?.settings.show()
         }
 
@@ -69,6 +71,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showPopover() {
         guard let button = item.button else { return }
         panel.prepareForOpen()
+        let front = NSWorkspace.shared.frontmostApplication
+        previousApp =
+            (front?.processIdentifier == ProcessInfo.processInfo.processIdentifier) ? nil : front
         NSApp.activate(ignoringOtherApps: true)
         panel.show(below: button)
         panel.focusSearch()
@@ -85,7 +90,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 {
                     return
                 }
-                self.closePopover()
+                self.closePopover(restoreFocus: false)  // the user clicked another app; let that one keep focus
             }
         }
         // Esc closes; arrows / Return / ⌘1-9 / ⌘P / ⌘⌫ go to the panel (ignored while an alert is up)
@@ -139,7 +144,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if Settings.clearOnQuit { store.clearUnpinned() }
     }
 
-    private func closePopover() {
+    /// `restoreFocus`: give keyboard focus back to the app that was in front before the panel opened.
+    /// It's off when something else takes over on purpose (a click in another app, Settings, Finder).
+    private func closePopover(restoreFocus: Bool = true) {
         panel.didClose()
         if let m = clickMonitor {
             NSEvent.removeMonitor(m)
@@ -149,5 +156,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSEvent.removeMonitor(m)
             keyMonitor = nil
         }
+        if restoreFocus { previousApp?.activate(options: []) }
+        previousApp = nil
     }
 }
